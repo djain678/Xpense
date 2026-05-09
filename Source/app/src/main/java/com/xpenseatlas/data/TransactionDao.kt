@@ -8,6 +8,15 @@ interface TransactionDao {
     @Query("SELECT *, (SELECT amount FROM transactions t2 WHERE t2.vendor = t1.vendor AND t2.timestamp < t1.timestamp ORDER BY t2.timestamp DESC LIMIT 1) as previousAmount FROM transactions t1 ORDER BY timestamp DESC")
     fun getAllTransactions(): Flow<List<TransactionWithMemory>>
 
+    @Query("SELECT *, (SELECT amount FROM transactions t2 WHERE t2.vendor = t1.vendor AND t2.timestamp < t1.timestamp ORDER BY t2.timestamp DESC LIMIT 1) as previousAmount FROM transactions t1 WHERE t1.timestamp >= :start AND t1.timestamp <= :end AND t1.isBusiness = :isBusiness ORDER BY timestamp DESC")
+    fun getTransactionsForMonth(start: Long, end: Long, isBusiness: Boolean): Flow<List<TransactionWithMemory>>
+
+    @Query("SELECT SUM(amount) FROM transactions WHERE isDebit = 1 AND timestamp >= :start AND timestamp <= :end AND isBusiness = :isBusiness")
+    fun getMonthlyDebits(start: Long, end: Long, isBusiness: Boolean): Flow<Double?>
+
+    @Query("SELECT SUM(amount) FROM transactions WHERE isDebit = 0 AND timestamp >= :start AND timestamp <= :end AND isBusiness = :isBusiness")
+    fun getMonthlyCredits(start: Long, end: Long, isBusiness: Boolean): Flow<Double?>
+
     @Query("SELECT * FROM transactions WHERE timestamp >= :startTime ORDER BY timestamp DESC")
     fun getTransactionsForPeriod(startTime: Long): Flow<List<Transaction>>
 
@@ -37,6 +46,9 @@ interface TransactionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: Transaction)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTransactions(transactions: List<Transaction>)
 
     @Delete
     suspend fun deleteTransaction(transaction: Transaction)

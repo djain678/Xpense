@@ -1,105 +1,71 @@
-# XpenseAtlas Ultimate Edition — Handover Log
+# XpenseAtlas — Forest 8-Bit Edition Handbook
 
 > **Project**: XpenseAtlas — Privacy-First Financial Intelligence Vault  
+> **Edition**: Forest 8-Bit Overhaul (v1.1)  
 > **Date**: 2026-05-10  
 > **Author**: Antigravity AI  
-> **Status**: Code Complete — **Ultimate Edition**  
-> **Location**: `c:\Users\divya\.gemini\antigravity\playground\primordial-bohr\XpenseAtlas\`
+> **Status**: **STABLE & COMPLETE**
 
 ---
 
-## 1. What Is XpenseAtlas?
+## 1. Design Philosophy: "The Digital Forest"
 
-XpenseAtlas is a **premium, offline-first financial vault** designed for the privacy-conscious user in India. It automatically transforms bank SMS alerts into a rich, searchable, and secure financial dashboard without ever connecting to the internet.
+XpenseAtlas has been redesigned with a **Forest 8-bit** aesthetic, moving away from generic modern UI toward a unique, premium "RPG-style" experience.
 
-### Core Philosophy: "Zero-Cloud Fortress"
-- 🛡️ **No Internet**: The app is 100% offline. No cloud, no servers, no leaks.
-- 🔒 **Biometric Security**: Gated behind Fingerprint/Face ID.
-- 📍 **GPS Intelligence**: Automatically tags every transaction with its physical location.
-- 🧠 **On-Device AI**: Local OCR for receipts, STT for voice logging, and a learning engine for merchant categories.
-
----
-
-## 2. Feature Architecture
-
-### 2.1 The Financial Intelligence Core
-- **SMS Parser**: Advanced regex engine that detects amounts and currencies from Indian Banks/UPI.
-- **Learning Engine**: Remembers when you manually change a merchant's category and applies it to future transactions.
-- **Subscription Detective**: Identifies recurring payment patterns to flag hidden subscriptions.
-
-### 2.2 Privacy & Utility
-- **🕵️ Shadow Mode**: One-tap toggle to mask all currency amounts in public places.
-- **💱 Multi-Currency**: Dynamic detection of $, €, £, and AED.
-- **🌍 Travel Mode**: Offline country detection via GPS bounding boxes (Works without Roaming/Internet).
-- **📄 Local Export**: Standardized CSV generator for data portability.
-
-### 2.3 Connectivity & Interaction
-- **🤝 Partner Sync (P2P)**: Offline sync with a partner's device over local Wi-Fi using Google Nearby Connections.
-- **🗣️ Voice Atlas**: On-device Speech-to-Text for logging cash expenses hands-free.
-- **📸 Receipt OCR**: ML Kit-powered scanner to digitize paper bills.
-- **↩️ U-Turn UPI**: Floating shortcut to launch your payment app of choice instantly.
+### 🎨 Visual Language
+- **8-Bit Art Style**: Sharp 4dp corners, pixel-perfect borders (2.0dp), and monospace typography.
+- **Forest Palette**: 
+    - `ForestBlack` (#0A1A0A) for deep backgrounds.
+    - `GlowGreen` (#7FFF5F) for highlights and income.
+    - `PixelRed` (#D93025) for debit alerts.
+- **Zero Clipping**: All UI components are built with dynamic heights and overflow protection to ensure text is never cut off on any device.
 
 ---
 
-## 3. Technical Stack
+## 2. Core Feature Overhaul (v1.1)
 
-| Layer | Technology |
-|:------|:-----------|
-| **Language** | Kotlin 2.1.0 |
-| **UI** | Jetpack Compose (Material 3) |
-| **Database** | Room (Offline SQLite) |
-| **Security** | Android Biometric Library |
-| **Background** | WorkManager (Automated Reports) |
-| **Connectivity** | Google Nearby Connections API |
-| **Intelligence** | ML Kit (Text Recognition & Entity Extraction) |
+### 📊 Monthly Spending Engine (The "RPG Card")
+The dashboard now centers around a **Monthly Spend Card** that tracks your journey month-over-month.
+- **◀ ▶ Month Navigation**: Quickly cycle through past months to compare spending habits.
+- **Month Picker**: Tap the month name to open a pixel-art grid to jump to any month in any year.
+- **Debit vs Credit**: Tracking is now split into "↓ SPENT" and "↑ RECEIVED" chips, ensuring income and expenses are never muddled.
 
----
-
-## 4. File Map & Project Structure
-
-```
-XpenseAtlas/
-├── app/
-│   ├── src/main/
-│   │   ├── AndroidManifest.xml      # NFC, Biometric, and SMS permissions
-│   │   ├── java/com/xpenseatlas/
-│   │   │   ├── MainActivity.kt      # Biometric gating + Profile state
-│   │   │   ├── data/
-│   │   │   │   ├── AppDatabase.kt   # Room DB (v3)
-│   │   │   │   └── Transaction.kt   # Core data models
-│   │   │   ├── logic/
-│   │   │   │   ├── SmsParser.kt     # Multi-currency regex engine
-│   │   │   │   ├── TravelManager.kt # Offline GPS bounding boxes
-│   │   │   │   ├── ReceiptScanner.kt# ML Kit OCR logic
-│   │   │   │   └── PartnerSync.kt   # P2P Nearby Connections
-│   │   │   └── ui/screens/
-│   │   │       ├── DashboardScreen.kt # The "Fortress" UI
-│   │   │       ├── CalendarScreen.kt  # Spend-density calendar
-│   │   │       └── SplitDialog.kt     # Bill splitting UI
-```
+### 📱 Historical SMS Scanner
+The most powerful tool for new users. Instead of starting from zero, XpenseAtlas can retroactively build your financial history.
+- **Scan Past SMS**: One-tap deep scan of your entire Android SMS inbox.
+- **Intelligence**: Uses the `SmsParser` engine to identify old bank/UPI messages from months before the app was installed.
+- **On-Device Only**: This scan happens purely in RAM and local SQLite; no data ever leaves your device.
 
 ---
 
-## 5. Deployment & Testing
+## 3. Technical Architecture
 
-### Installation
-The latest build is located at:
-`c:\Users\divya\.gemini\antigravity\playground\primordial-bohr\XpenseAtlas\app\build\outputs\apk\debug\app-debug.apk`
-
-### Manual Test Checklist
-1. **Biometric**: Launch app → System prompt for Fingerprint/Face ID.
-2. **Shadow Mode**: Tap the "Eye" icon → All currency values should show `****`.
-3. **Voice**: Tap Mic → Say "Fifty on Coffee" → Transaction should appear.
-4. **Partner Sync**: Tap Sync on two devices on same Wi-Fi → P2P transfer of records.
-5. **Travel**: Mock location to Dubai (25.2, 55.2) → App should identify "UAE" and "AED" currency.
+| Layer | Component | Purpose |
+|:------|:----------|:--------|
+| **UI** | DashboardScreen.kt | The main "Forest" interface with 8-bit styling and month navigation. |
+| **Logic** | SmsScanner.kt | New background service for bulk-parsing historical SMS messages. |
+| **Data** | TransactionDao.kt | Updated with monthly filtering (`getTransactionsForMonth`) and bulk-insert capability. |
+| **Theme** | Color.kt | Defines the Moss, Bark, and GlowGreen tokens. |
 
 ---
 
-## 6. AI Resumption Prompt
+## 4. Operational Checklist
 
-If you are continuing development with an AI assistant, use this prompt:
+### Syncing to GitHub
+To push your changes, use the dedicated folder:
+`C:\Users\divya\.gemini\antigravity\playground\primordial-bohr\XpenseAtlas_Complete`
 
-> *"I am working on XpenseAtlas, a privacy-first offline finance vault. Read the `xpenseatlas_handover_log.md` to understand the architecture, including Nearby Connections for P2P sync and ML Kit for OCR. Current goal: [Insert Goal]"*
+### Manual Verification
+1. **The Forest Look**: Launch app → background should be a dark forest gradient.
+2. **History Scan**: Tap "Scan Past SMS" → Watch the progress bar as it finds your old bank transactions.
+3. **Time Travel**: Use ◀ ▶ on the top card to verify spending totals update correctly for previous months.
+4. **Vault Entry**: Biometric gating remains mandatory for entry.
 
 ---
-© 2026 XpenseAtlas Ultimate Edition. Local Data. Absolute Privacy.
+
+## 5. Deployment Info
+- **Source**: `Source/` folder in the root.
+- **APK**: `APK/XpenseAtlas_v1.1_Forest.apk`.
+
+---
+© 2026 XpenseAtlas Ultimate Edition. **Local Data. Forest Aesthetics. Absolute Privacy.**
