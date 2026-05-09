@@ -53,10 +53,12 @@ fun DashboardScreen(
     onExport: () -> Unit,
     onLaunchUpi: () -> Unit,
     onScanPastSms: () -> Unit,
+    onWipeAndRescan: () -> Unit,
     isScanningPast: Boolean,
     scanProgress: Pair<Int, Int>
 ) {
     var showMonthPicker by remember { mutableStateOf(false) }
+    var selectedTransaction by remember { mutableStateOf<TransactionWithMemory?>(null) }
 
     val filtered = monthTransactions.filter {
         val tx = it.transaction
@@ -78,6 +80,9 @@ fun DashboardScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = onWipeAndRescan) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Wipe & Rescan", tint = PixelYellow)
+                    }
                     IconButton(onClick = onToggleShadowMode) {
                         Icon(
                             if (isShadowMode) Icons.Default.VisibilityOff else Icons.Default.Visibility,
@@ -221,7 +226,11 @@ fun DashboardScreen(
                     }
                 } else {
                     items(filtered, key = { it.transaction.id }) { item ->
-                        TransactionItem(item = item, isShadowMode = isShadowMode)
+                        TransactionItem(
+                            item = item, 
+                            isShadowMode = isShadowMode,
+                            onClick = { selectedTransaction = item }
+                        )
                     }
                 }
             }
@@ -237,6 +246,109 @@ fun DashboardScreen(
             },
             onDismiss = { showMonthPicker = false }
         )
+    }
+
+    selectedTransaction?.let { tx ->
+        TransactionDetailsDialog(
+            item = tx,
+            onDismiss = { selectedTransaction = null }
+        )
+    }
+}
+
+// ─── Transaction Details Dialog ──────────────────────────────────────────────
+
+@Composable
+fun TransactionDetailsDialog(
+    item: TransactionWithMemory,
+    onDismiss: () -> Unit
+) {
+    val tx = item.transaction
+    val dateFormat = SimpleDateFormat("EEEE, dd MMMM yyyy · hh:mm a", Locale.getDefault())
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = ForestDark,
+            border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.3f))
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    "TRANSACTION DETAILS",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 14.sp,
+                    color = GlowGreen,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                DetailRow("Vendor", tx.vendor)
+                DetailRow("Amount", "${tx.currency} ${tx.amount}")
+                DetailRow("Type", if (tx.isDebit) "Debit (Expense)" else "Credit (Income)")
+                DetailRow("Category", tx.category)
+                DetailRow("Date", dateFormat.format(Date(tx.timestamp)))
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = MossGreen.copy(alpha = 0.1f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("GPS LOCATION", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MossGreen)
+                if (tx.latitude != null && tx.longitude != null) {
+                    Text(
+                        "${tx.latitude}, ${tx.longitude}",
+                        fontSize = 13.sp,
+                        color = PixelCream
+                    )
+                    Text("Location captured at time of SMS receipt.", fontSize = 10.sp, color = PixelGray)
+                } else {
+                    Text(
+                        "No GPS data available.",
+                        fontSize = 13.sp,
+                        color = PixelGray
+                    )
+                    Text(
+                        "Note: Historical scans cannot retrieve location data as it is not stored in SMS messages.", 
+                        fontSize = 10.sp, 
+                        color = PixelGray,
+                        lineHeight = 14.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("RAW MESSAGE", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MossGreen)
+                Surface(
+                    color = ForestBlack,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Text(
+                        tx.rawSms,
+                        fontSize = 11.sp,
+                        color = PixelGray,
+                        modifier = Modifier.padding(12.dp),
+                        lineHeight = 16.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MossGreen),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("CLOSE", fontWeight = FontWeight.Bold, color = ForestBlack)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(label, modifier = Modifier.width(80.dp), color = PixelGray, fontSize = 12.sp)
+        Text(value, modifier = Modifier.weight(1f), color = PixelCream, fontWeight = FontWeight.Bold, fontSize = 13.sp)
     }
 }
 
@@ -482,13 +594,17 @@ fun ScanPastSmsButton(
 // ─── Transaction Item ────────────────────────────────────────────────────────
 
 @Composable
-fun TransactionItem(item: TransactionWithMemory, isShadowMode: Boolean) {
+fun TransactionItem(
+    item: TransactionWithMemory, 
+    isShadowMode: Boolean,
+    onClick: () -> Unit
+) {
     val tx = item.transaction
     val dateFormat = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
     val amountColor = if (tx.isDebit) PixelRed else GlowGreen
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         color = ForestDark.copy(alpha = 0.6f),
         border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.1f))
@@ -497,7 +613,7 @@ fun TransactionItem(item: TransactionWithMemory, isShadowMode: Boolean) {
             modifier = Modifier.padding(16.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Category Icon (Dynamic color based on debit/credit)
+            // Category Icon
             Surface(
                 modifier = Modifier.size(44.dp),
                 color = amountColor.copy(alpha = 0.1f),

@@ -114,18 +114,28 @@ class MainActivity : FragmentActivity() {
                 }
 
                 // ── Scan past SMS ────────────────────────────────────────
-                fun scanPastSms() {
+                fun scanPastSms(wipeFirst: Boolean = false) {
                     coroutineScope.launch(Dispatchers.IO) {
-                        isScanningPast = true
-                        scanProgress = 0 to 0
-                        val found = SmsScanner.scanAllInbox(this@MainActivity) { cur, total ->
-                            scanProgress = cur to total
+                        try {
+                            isScanningPast = true
+                            scanProgress = 0 to 0
+                            
+                            if (wipeFirst) {
+                                db.transactionDao().clearAllTransactions()
+                            }
+
+                            val found = SmsScanner.scanAllInbox(this@MainActivity) { cur, total ->
+                                scanProgress = cur to total
+                            }
+                            if (found.isNotEmpty()) {
+                                db.transactionDao().insertTransactions(found)
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        } finally {
+                            isScanningPast = false
+                            scanProgress = 0 to 0
                         }
-                        if (found.isNotEmpty()) {
-                            db.transactionDao().insertTransactions(found)
-                        }
-                        isScanningPast = false
-                        scanProgress = 0 to 0
                     }
                 }
 
@@ -149,7 +159,8 @@ class MainActivity : FragmentActivity() {
                             ExportHelper.exportToCsv(this@MainActivity, monthTransactions.map { it.transaction })
                         },
                         onLaunchUpi         = { UpiLauncher.launchUpi(this@MainActivity) },
-                        onScanPastSms       = { scanPastSms() },
+                        onScanPastSms       = { scanPastSms(wipeFirst = false) },
+                        onWipeAndRescan     = { scanPastSms(wipeFirst = true) },
                         isScanningPast      = isScanningPast,
                         scanProgress        = scanProgress
                     )
