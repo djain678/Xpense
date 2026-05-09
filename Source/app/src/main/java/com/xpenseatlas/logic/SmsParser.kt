@@ -15,17 +15,17 @@ object SmsParser {
     private val AMOUNT_REGEX = Pattern.compile("(?i)(?:rs\\.?|inr|₹|\\$|£|€|aed)\\s*([\\d,]+\\.?\\d*)")
     
     // Broad list of keywords for any transaction in Indian context
-    private val DEBIT_KEYWORDS = listOf("debited", "spent", "paid", "sent", "payment", "withdrawn", "purchased", "txn", "trf", "vpa")
-    private val CREDIT_KEYWORDS = listOf("credited", "received", "refunded", "added", "deposited", "incoming")
+    private val DEBIT_KEYWORDS = listOf("debited", "spent", "paid", "sent", "payment", "withdrawn", "purchased", "txn", "trf", "vpa", "towards")
+    private val CREDIT_KEYWORDS = listOf("credited", "received", "refunded", "added", "deposited", "incoming", "reversal")
     
-    // Only ignore if it is EXCLUSIVELY an information message with no transaction intent
-    private val INFO_ONLY_KEYWORDS = listOf("otp", "pre-approved", "remind", "score", "insurance", "outstanding")
+    // Hard-discard only absolute non-financial noise
+    private val NOISE_KEYWORDS = listOf("otp", "pre-approved", "score", "insurance")
 
     fun parse(sms: String): ParsedTransaction? {
         val cleanSms = sms.lowercase()
         
-        // 1. Hard-discard pure spam/info
-        if (INFO_ONLY_KEYWORDS.any { cleanSms.contains(it) }) return null
+        // 1. Hard-discard noise
+        if (NOISE_KEYWORDS.any { cleanSms.contains(it) }) return null
 
         // 2. Extract Amount
         val matcher = AMOUNT_REGEX.matcher(sms)
@@ -37,10 +37,10 @@ object SmsParser {
             val amtStr = matcher.group(2)?.replace(",", "") ?: continue
             val amt = amtStr.toDoubleOrNull() ?: continue
             
-            // Heuristic: The first number that ISN'T preceded by "balance" or "bal" is the transaction
+            // Heuristic: Prefer the number that is NOT the balance
             val start = matcher.start()
-            val window = cleanSms.substring(Math.max(0, start - 15), start)
-            if (!window.contains("bal") && !window.contains("limit")) {
+            val windowBefore = cleanSms.substring(Math.max(0, start - 15), start)
+            if (!windowBefore.contains("bal") && !windowBefore.contains("limit")) {
                 bestAmount = amt
                 bestCurrency = curr
                 break 
@@ -57,26 +57,24 @@ object SmsParser {
         val isDebit = DEBIT_KEYWORDS.any { cleanSms.contains(it) }
         val isCredit = CREDIT_KEYWORDS.any { cleanSms.contains(it) }
         
-        // Smarter Logic:
-        // - If it mentions "Loan", "Balance", or "Limit" but NO transaction keywords -> Info only (ignore)
-        if ((cleanSms.contains("loan") || cleanSms.contains("balance") || cleanSms.contains("limit")) && !isDebit && !isCredit) {
-            return null
-        }
-
+        // If it's explicitly credit, it's credit.
+        // If it's not credit but has debit keywords, it's debit.
+        // If it has NO keywords but we found an amount, it's likely a transaction we should catch.
         val finalIsDebit = when {
             isCredit -> false
             isDebit -> true
-            else -> true // Fallback to Debit for safety if an amount was found and it's not credit
+            else -> true // Default to Debit if we found a currency amount in a bank-like message
         }
 
         // 4. Extract Vendor
         var vendor = "Unknown Merchant"
         val vendorPatterns = listOf(
-            "(?i)at\\s+([a-z0-9.\\s&]+)", 
-            "(?i)to\\s+([a-z0-9.\\s&]+)", 
+            "(?i)at\\s+([a-z0-9.\\s&@]+)", 
+            "(?i)to\\s+([a-z0-9.\\s&@]+)", 
             "(?i)vpa\\s+([a-z0-9@.\\s&]+)",
             "(?i)info[:\\s]+([a-z0-9.\\s&]+)",
-            "(?i)towards\\s+([a-z0-9.\\s&]+)"
+            "(?i)towards\\s+([a-z0-9.\\s&]+)",
+            "(?i)ref[:\\s]*([a-z0-9.\\s&]+)"
         )
         
         for (patternStr in vendorPatterns) {
@@ -84,16 +82,21 @@ object SmsParser {
             if (vMatcher.find()) {
                 val found = vMatcher.group(1)?.trim() ?: ""
                 if (found.isNotEmpty() && found.length > 2) {
-                    vendor = found.split(" on ")[0].split(" ref ")[0].split(" ref:")[0].trim()
+                    // Clean up: stop at "on", "ref", "dated", etc.
+                    vendor = found.split(" on ")[0]
+                                 .split(" ref")[0]
+                                 .split(" dated")[0]
+                                 .split(" avbl")[0]
+                                 .trim()
                     break
                 }
             }
         }
 
-        // Fallback for vendor: if still unknown, try to find the sender ID (if passed) or just use the first capitalized word
+        // Fallback for vendor
         if (vendor == "Unknown Merchant") {
             val words = sms.split(" ").filter { it.length > 3 && it.any { c -> c.isLetter() } }
-            vendor = words.firstOrNull { it.any { c -> c.isUpperCase() } } ?: "MANUAL"
+            vendor = words.firstOrNull { it.any { c -> c.isUpperCase() } } ?: "TRANSACTION"
         }
 
         return ParsedTransaction(

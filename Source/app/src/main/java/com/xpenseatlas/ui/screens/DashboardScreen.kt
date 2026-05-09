@@ -31,6 +31,8 @@ import com.xpenseatlas.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+enum class TransactionFilter { ALL, DEBIT, CREDIT }
+
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,12 +61,21 @@ fun DashboardScreen(
 ) {
     var showMonthPicker by remember { mutableStateOf(false) }
     var selectedTransaction by remember { mutableStateOf<TransactionWithMemory?>(null) }
+    var activeFilter by remember { mutableStateOf(TransactionFilter.ALL) }
 
     val filtered = monthTransactions.filter {
         val tx = it.transaction
-        tx.vendor.contains(searchQuery, ignoreCase = true) ||
-        tx.category.contains(searchQuery, ignoreCase = true) ||
-        tx.amount.toString().contains(searchQuery)
+        val matchesSearch = tx.vendor.contains(searchQuery, ignoreCase = true) ||
+                           tx.category.contains(searchQuery, ignoreCase = true) ||
+                           tx.amount.toString().contains(searchQuery)
+        
+        val matchesFilter = when (activeFilter) {
+            TransactionFilter.ALL -> true
+            TransactionFilter.DEBIT -> tx.isDebit
+            TransactionFilter.CREDIT -> !tx.isDebit
+        }
+        
+        matchesSearch && matchesFilter
     }
 
     Scaffold(
@@ -134,9 +145,11 @@ fun DashboardScreen(
                         credits = monthlyCredits,
                         selectedMonthStart = selectedMonthStart,
                         isShadowMode = isShadowMode,
+                        activeFilter = activeFilter,
                         onPrevMonth = onPrevMonth,
                         onNextMonth = onNextMonth,
-                        onPickMonth = { showMonthPicker = true }
+                        onPickMonth = { showMonthPicker = true },
+                        onFilterChanged = { activeFilter = it }
                     )
                 }
 
@@ -185,7 +198,7 @@ fun DashboardScreen(
                     )
                 }
 
-                // Section header
+                // Section header with active filter badge
                 item {
                     val monthLabel = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
                         .format(Date(selectedMonthStart)).uppercase()
@@ -197,12 +210,25 @@ fun DashboardScreen(
                             color = PixelGray,
                             modifier = Modifier.padding(end = 8.dp)
                         )
-                        Divider(color = MossGreen.copy(alpha = 0.2f), modifier = Modifier.weight(1f))
+                        if (activeFilter != TransactionFilter.ALL) {
+                            Surface(
+                                color = if (activeFilter == TransactionFilter.DEBIT) PixelRed.copy(alpha = 0.2f) else GlowGreen.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    activeFilter.name,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (activeFilter == TransactionFilter.DEBIT) PixelRed else GlowGreen,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Divider(color = MossGreen.copy(alpha = 0.2f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                         Text(
                             monthLabel,
                             fontSize = 10.sp,
-                            color = MossGreen,
-                            modifier = Modifier.padding(start = 8.dp)
+                            color = MossGreen
                         )
                     }
                 }
@@ -215,13 +241,20 @@ fun DashboardScreen(
                                 .height(150.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                if (searchQuery.isEmpty()) "No transactions found for this month"
-                                else "No results matching '$searchQuery'",
-                                color = PixelGray,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    if (searchQuery.isEmpty()) "No transactions found"
+                                    else "No results matching '$searchQuery'",
+                                    color = PixelGray,
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                                if (activeFilter != TransactionFilter.ALL) {
+                                    TextButton(onClick = { activeFilter = TransactionFilter.ALL }) {
+                                        Text("Clear Filters", color = GlowGreen, fontSize = 12.sp)
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -299,19 +332,8 @@ fun TransactionDetailsDialog(
                         fontSize = 13.sp,
                         color = PixelCream
                     )
-                    Text("Location captured at time of SMS receipt.", fontSize = 10.sp, color = PixelGray)
                 } else {
-                    Text(
-                        "No GPS data available.",
-                        fontSize = 13.sp,
-                        color = PixelGray
-                    )
-                    Text(
-                        "Note: Historical scans cannot retrieve location data as it is not stored in SMS messages.", 
-                        fontSize = 10.sp, 
-                        color = PixelGray,
-                        lineHeight = 14.sp
-                    )
+                    Text("No GPS data available.", fontSize = 13.sp, color = PixelGray)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -360,9 +382,11 @@ fun MonthlySpendCard(
     credits: Double,
     selectedMonthStart: Long,
     isShadowMode: Boolean,
+    activeFilter: TransactionFilter,
     onPrevMonth: () -> Unit,
     onNextMonth: () -> Unit,
-    onPickMonth: () -> Unit
+    onPickMonth: () -> Unit,
+    onFilterChanged: (TransactionFilter) -> Unit
 ) {
     val monthLabel = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
         .format(Date(selectedMonthStart)).uppercase()
@@ -418,27 +442,32 @@ fun MonthlySpendCard(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Big Spend Number
-            Text(
-                "MONTHLY EXPENDITURE",
-                fontSize = 11.sp,
-                color = PixelGray,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
-            Text(
-                if (isShadowMode) "₹ * * * * *"
-                else "₹${String.format("%,.0f", debits)}",
-                fontWeight = FontWeight.Black,
-                fontSize = 34.sp,
-                color = PixelRed,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Big Spend Number (Tappable to clear filter)
+            Column(modifier = Modifier.clickable { onFilterChanged(TransactionFilter.ALL) }) {
+                Text(
+                    if (activeFilter == TransactionFilter.CREDIT) "MONTHLY INCOME" else "MONTHLY EXPENDITURE",
+                    fontSize = 11.sp,
+                    color = if (activeFilter == TransactionFilter.ALL) PixelGray else MossGreen,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    if (isShadowMode) "₹ * * * * *"
+                    else {
+                        val amt = if (activeFilter == TransactionFilter.CREDIT) credits else debits
+                        "₹${String.format("%,.0f", amt)}"
+                    },
+                    fontWeight = FontWeight.Black,
+                    fontSize = 34.sp,
+                    color = if (activeFilter == TransactionFilter.CREDIT) GlowGreen else PixelRed,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Debit / Credit split
+            // Debit / Credit split (Clickable to filter)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -448,6 +477,10 @@ fun MonthlySpendCard(
                     amount = debits,
                     color = PixelRed,
                     isShadowMode = isShadowMode,
+                    isSelected = activeFilter == TransactionFilter.DEBIT,
+                    onClick = { 
+                        onFilterChanged(if (activeFilter == TransactionFilter.DEBIT) TransactionFilter.ALL else TransactionFilter.DEBIT) 
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 SpendChip(
@@ -455,6 +488,10 @@ fun MonthlySpendCard(
                     amount = credits,
                     color = GlowGreen,
                     isShadowMode = isShadowMode,
+                    isSelected = activeFilter == TransactionFilter.CREDIT,
+                    onClick = { 
+                        onFilterChanged(if (activeFilter == TransactionFilter.CREDIT) TransactionFilter.ALL else TransactionFilter.CREDIT) 
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -468,19 +505,21 @@ fun SpendChip(
     amount: Double,
     color: Color,
     isShadowMode: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier,
-        color = color.copy(alpha = 0.08f),
+        modifier = modifier.clickable { onClick() },
+        color = if (isSelected) color.copy(alpha = 0.15f) else color.copy(alpha = 0.05f),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) color else color.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
                 label,
                 fontSize = 10.sp,
-                color = color,
+                color = if (isSelected) color else color.copy(alpha = 0.6f),
                 fontWeight = FontWeight.Bold
             )
             Text(

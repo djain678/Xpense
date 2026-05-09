@@ -2,6 +2,7 @@ package com.xpenseatlas.logic
 
 import android.content.Context
 import android.provider.Telephony
+import android.util.Log
 import com.xpenseatlas.data.Transaction
 
 object SmsScanner {
@@ -10,7 +11,7 @@ object SmsScanner {
         onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
     ): List<Transaction> {
         val results = mutableListOf<Transaction>()
-        val seen = mutableSetOf<String>() // deduplicate by rawSms+timestamp
+        val seen = mutableSetOf<String>()
 
         val cursor = context.contentResolver.query(
             Telephony.Sms.Inbox.CONTENT_URI,
@@ -31,34 +32,41 @@ object SmsScanner {
                 current++
                 onProgress(current, total)
 
-                val body    = c.getString(bodyIdx) ?: continue
-                val date    = c.getLong(dateIdx)
-                val address = c.getString(addressIdx) ?: ""
+                try {
+                    val body    = c.getString(bodyIdx) ?: continue
+                    val date    = c.getLong(dateIdx)
+                    val address = c.getString(addressIdx) ?: ""
 
-                // Only bank/UPI alphanumeric senders
-                if (!address.any { it.isLetter() }) continue
+                    // Only bank/UPI alphanumeric senders
+                    if (!address.any { it.isLetter() }) continue
 
-                val key = "$date:${body.take(40)}"
-                if (key in seen) continue
-                seen.add(key)
+                    val key = "$date:${body.take(20)}"
+                    if (key in seen) continue
+                    seen.add(key)
 
-                val parsed = SmsParser.parse(body) ?: continue
-
-                results.add(
-                    Transaction(
-                        amount    = parsed.amount,
-                        vendor    = parsed.vendor,
-                        category  = parsed.category,
-                        isDebit   = parsed.isDebit,
-                        currency  = parsed.currency,
-                        timestamp = date,
-                        latitude  = null,
-                        longitude = null,
-                        rawSms    = body
-                    )
-                )
+                    val parsed = SmsParser.parse(body)
+                    if (parsed != null) {
+                        results.add(
+                            Transaction(
+                                amount    = parsed.amount,
+                                vendor    = parsed.vendor,
+                                category  = parsed.category,
+                                isDebit   = parsed.isDebit,
+                                currency  = parsed.currency,
+                                timestamp = date,
+                                latitude  = null,
+                                longitude = null,
+                                rawSms    = body
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e("XpenseAtlas", "Failed to process SMS at index $current: ${e.message}")
+                    // Continue to next message
+                }
             }
         }
+        Log.d("XpenseAtlas", "Scan complete. Found ${results.size} transactions.")
         return results
     }
 }
