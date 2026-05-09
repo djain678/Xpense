@@ -32,13 +32,20 @@ object ExportHelper {
         shareFile(context, file)
     }
 
-    private fun shareFile(context: Context, file: File) {
+    private fun shareFile(context: Context, file: File, mimeType: String = "text/csv") {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
+            type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Export Atlas CSV"))
+        context.startActivity(Intent.createChooser(intent, "Share File"))
+    }
+
+    fun exportDebugTxt(context: Context, content: String) {
+        val fileName = "XpenseAtlas_Debug_${System.currentTimeMillis()}.txt"
+        val file = File(context.cacheDir, fileName)
+        file.writeText(content)
+        shareFile(context, file, "text/plain")
     }
 }

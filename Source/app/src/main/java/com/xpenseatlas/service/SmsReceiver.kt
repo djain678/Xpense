@@ -17,41 +17,47 @@ class SmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
+            val pendingResult = goAsync()
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             val fullMessage = messages.joinToString("") { it.messageBody }
             val sender = messages.firstOrNull()?.originatingAddress ?: "Unknown"
+            val timestamp = messages.firstOrNull()?.timestampMillis ?: System.currentTimeMillis()
 
-            // Only process if it looks like a bank/transactional sender (contains letters)
             if (sender.any { it.isLetter() }) {
-                processSms(context, fullMessage)
+                scope.launch {
+                    try {
+                        processSms(context, fullMessage, timestamp)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
+            } else {
+                pendingResult.finish()
             }
         }
     }
 
-    private fun processSms(context: Context, body: String) {
+    private suspend fun processSms(context: Context, body: String, timestamp: Long) {
         val parsed = SmsParser.parse(body) ?: return
         
-        scope.launch {
-            val db = AppDatabase.getDatabase(context)
-            val learnedCategory = db.transactionDao().getCategoryForVendor(parsed.vendor.uppercase())
-            
-            val location = LocationHelper.getCurrentLocation(context)
-            
-            val transaction = Transaction(
-                amount = parsed.amount,
-                vendor = parsed.vendor,
-                category = learnedCategory ?: parsed.category,
-                isDebit = parsed.isDebit,
-                currency = parsed.currency,
-                timestamp = System.currentTimeMillis(),
-                latitude = location?.latitude,
-                longitude = location?.longitude,
-                rawSms = body
-            )
+        val db = AppDatabase.getDatabase(context)
+        val learnedCategory = db.transactionDao().getCategoryForVendor(parsed.vendor.uppercase())
+        
+        val location = LocationHelper.getCurrentLocation(context)
+        
+        val transaction = Transaction(
+            amount = parsed.amount,
+            vendor = parsed.vendor,
+            category = learnedCategory ?: parsed.category,
+            isDebit = parsed.isDebit,
+            currency = parsed.currency,
+            timestamp = timestamp,
+            latitude = location?.latitude,
+            longitude = location?.longitude,
+            rawSms = body
+        )
 
-            db.transactionDao().insertTransaction(transaction)
-            
-            Log.d("XpenseAtlas", "Saved transaction: ${parsed.amount} at ${parsed.vendor}")
-        }
+        db.transactionDao().insertTransaction(transaction)
+        Log.d("XpenseAtlas", "Saved live transaction: ${parsed.amount} at ${parsed.vendor}")
     }
 }

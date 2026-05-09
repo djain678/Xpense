@@ -17,6 +17,7 @@ import com.xpenseatlas.ui.screens.ReportDialog
 import com.xpenseatlas.ui.theme.XpenseAtlasTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import java.util.Calendar
 
 class MainActivity : FragmentActivity() {
@@ -31,14 +32,18 @@ class MainActivity : FragmentActivity() {
         var isUnlocked by mutableStateOf(false)
         showBiometricPrompt { isUnlocked = true }
 
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.READ_SMS,
-                Manifest.permission.RECEIVE_SMS,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.READ_SMS,
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            // Note: On Android 11+ (R), this might need to be requested separately, 
+            // but adding it here ensures it's requested on Q and R properly where possible.
+            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
 
         setContent {
             XpenseAtlasTheme {
@@ -113,22 +118,44 @@ class MainActivity : FragmentActivity() {
                     }.timeInMillis
                 }
 
-                // ── Scan past SMS ────────────────────────────────────────
-                fun scanPastSms(wipeFirst: Boolean = false) {
+                fun scanPastSms(isFullSync: Boolean) {
                     coroutineScope.launch(Dispatchers.IO) {
                         try {
                             isScanningPast = true
                             scanProgress = 0 to 0
                             
-                            if (wipeFirst) {
+                            // 1. Fetch all transactions that have GPS data
+                            val allExistingList = db.transactionDao().getTransactionsForPeriod(0).first()
+                            val gpsCache = allExistingList.filter { it.latitude != null && it.longitude != null }
+                                .associate { it.rawSms to (it.latitude to it.longitude) }
+
+                            // 2. Clear data based on sync type
+                            var startScanMillis: Long? = null
+                            var endScanMillis: Long? = null
+                            if (isFullSync) {
                                 db.transactionDao().clearAllTransactions()
+                            } else {
+                                db.transactionDao().clearTransactionsForPeriod(selectedMonthStart, selectedMonthEnd)
+                                startScanMillis = selectedMonthStart
+                                endScanMillis = selectedMonthEnd
                             }
 
-                            val found = SmsScanner.scanAllInbox(this@MainActivity) { cur, total ->
-                                scanProgress = cur to total
-                            }
+                            // 3. Scan Inbox
+                            val found = SmsScanner.scanAllInbox(
+                                context = this@MainActivity,
+                                startMillis = startScanMillis,
+                                endMillis = endScanMillis,
+                                progressCallback = { cur, total -> scanProgress = cur to total }
+                            )
+
+                            // 4. Apply GPS Cache and Insert
                             if (found.isNotEmpty()) {
-                                db.transactionDao().insertTransactions(found)
+                                val merged = found.map { tx ->
+                                    gpsCache[tx.rawSms]?.let { (lat, lng) ->
+                                        tx.copy(latitude = lat, longitude = lng)
+                                    } ?: tx
+                                }
+                                db.transactionDao().insertTransactions(merged)
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -158,9 +185,24 @@ class MainActivity : FragmentActivity() {
                         onExport            = {
                             ExportHelper.exportToCsv(this@MainActivity, monthTransactions.map { it.transaction })
                         },
+                        onExportDebug       = {
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val report = SmsScanner.generateDebugReport(this@MainActivity)
+                                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                    ExportHelper.exportDebugTxt(this@MainActivity, report)
+                                }
+                            }
+                        },
                         onLaunchUpi         = { UpiLauncher.launchUpi(this@MainActivity) },
-                        onScanPastSms       = { scanPastSms(wipeFirst = false) },
-                        onWipeAndRescan     = { scanPastSms(wipeFirst = true) },
+                        onSyncCurrentMonth  = { scanPastSms(isFullSync = false) },
+                        onSyncAllTime       = { scanPastSms(isFullSync = true) },
+                        onBlockVendor       = { vendor ->
+                            val settings = com.xpenseatlas.logic.SettingsManager(this@MainActivity)
+                            settings.addToBlocklist(vendor)
+                            coroutineScope.launch(Dispatchers.IO) {
+                                db.transactionDao().deleteTransactionsByVendor(vendor)
+                            }
+                        },
                         isScanningPast      = isScanningPast,
                         scanProgress        = scanProgress
                     )
@@ -169,6 +211,7 @@ class MainActivity : FragmentActivity() {
                         ReportDialog(
                             categoryTotals = categoryTotals,
                             topMerchants   = topMerchants,
+                            monthTransactions = monthTransactions,
                             selectedMonth  = Calendar.getInstance().apply { timeInMillis = selectedMonthStart },
                             onMonthChanged = { selectedMonthStart = it.timeInMillis },
                             onDismiss      = { showReport = false }

@@ -53,6 +53,12 @@ interface TransactionDao {
     @Query("DELETE FROM transactions")
     suspend fun clearAllTransactions()
 
+    @Query("DELETE FROM transactions WHERE timestamp >= :start AND timestamp <= :end")
+    suspend fun clearTransactionsForPeriod(start: Long, end: Long)
+
+    @Query("DELETE FROM transactions WHERE vendor LIKE '%' || :vendor || '%'")
+    suspend fun deleteTransactionsByVendor(vendor: String)
+
     @Delete
     suspend fun deleteTransaction(transaction: Transaction)
 }

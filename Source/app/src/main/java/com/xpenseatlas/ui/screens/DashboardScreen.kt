@@ -31,6 +31,8 @@ import com.xpenseatlas.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+import com.xpenseatlas.logic.SettingsManager
+
 enum class TransactionFilter { ALL, DEBIT, CREDIT }
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
@@ -53,13 +55,17 @@ fun DashboardScreen(
     onToggleShadowMode: () -> Unit,
     onShowReport: () -> Unit,
     onExport: () -> Unit,
+    onExportDebug: () -> Unit,
     onLaunchUpi: () -> Unit,
-    onScanPastSms: () -> Unit,
-    onWipeAndRescan: () -> Unit,
+    onSyncCurrentMonth: () -> Unit,
+    onSyncAllTime: () -> Unit,
+    onBlockVendor: (String) -> Unit,
     isScanningPast: Boolean,
     scanProgress: Pair<Int, Int>
 ) {
     var showMonthPicker by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showSyncDialog by remember { mutableStateOf(false) }
     var selectedTransaction by remember { mutableStateOf<TransactionWithMemory?>(null) }
     var activeFilter by remember { mutableStateOf(TransactionFilter.ALL) }
 
@@ -91,8 +97,14 @@ fun DashboardScreen(
                     )
                 },
                 actions = {
-                    IconButton(onClick = onWipeAndRescan) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Wipe & Rescan", tint = PixelYellow)
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = PixelGray)
+                    }
+                    IconButton(onClick = onExportDebug) {
+                        Icon(Icons.Default.BugReport, contentDescription = "Debug Parser", tint = PixelYellow)
+                    }
+                    IconButton(onClick = { showSyncDialog = true }) {
+                        Icon(Icons.Default.Sync, contentDescription = "Sync", tint = GlowGreen)
                     }
                     IconButton(onClick = onToggleShadowMode) {
                         Icon(
@@ -189,13 +201,15 @@ fun DashboardScreen(
                     )
                 }
 
-                // Scan Past SMS
-                item {
-                    ScanPastSmsButton(
-                        isScanning = isScanningPast,
-                        progress = scanProgress,
-                        onClick = onScanPastSms
-                    )
+                // Scan progress indicator
+                if (isScanningPast) {
+                    item {
+                        ScanPastSmsButton(
+                            isScanning = true,
+                            progress = scanProgress,
+                            onClick = { /* Do nothing */ }
+                        )
+                    }
                 }
 
                 // Section header with active filter badge
@@ -224,7 +238,7 @@ fun DashboardScreen(
                                 )
                             }
                         }
-                        Divider(color = MossGreen.copy(alpha = 0.2f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+                        HorizontalDivider(color = MossGreen.copy(alpha = 0.2f), modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                         Text(
                             monthLabel,
                             fontSize = 10.sp,
@@ -281,11 +295,245 @@ fun DashboardScreen(
         )
     }
 
+    if (showSettings) {
+        SettingsDialog(onDismiss = { showSettings = false })
+    }
+
+    if (showSyncDialog) {
+        SyncDialog(
+            onDismiss = { showSyncDialog = false },
+            onSyncCurrentMonth = onSyncCurrentMonth,
+            onSyncAllTime = onSyncAllTime
+        )
+    }
+
     selectedTransaction?.let { tx ->
         TransactionDetailsDialog(
             item = tx,
-            onDismiss = { selectedTransaction = null }
+            onDismiss = { selectedTransaction = null },
+            onBlockVendor = { 
+                onBlockVendor(it)
+                selectedTransaction = null
+            }
         )
+    }
+}
+
+// ─── Settings / Blocklist Dialog ─────────────────────────────────────────────
+
+@Composable
+fun SettingsDialog(onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val settings = remember { SettingsManager(context) }
+    var blocklist by remember { mutableStateOf(settings.getBlocklist().toList().sorted()) }
+    var newKeyword by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = ForestDark,
+            border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.3f))
+        ) {
+            Column(modifier = Modifier.padding(24.dp).fillMaxWidth()) {
+                Text(
+                    "PARSER SETTINGS",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 14.sp,
+                    color = GlowGreen,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    "Ignore SMS containing these keywords",
+                    fontSize = 11.sp,
+                    color = PixelGray,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                )
+
+                // Input field
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newKeyword,
+                        onValueChange = { newKeyword = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("e.g. SWIGGY", fontSize = 12.sp, color = PixelGray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MossGreen,
+                            unfocusedBorderColor = MossGreen.copy(alpha = 0.3f),
+                            focusedTextColor = PixelCream,
+                            unfocusedTextColor = PixelCream
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (newKeyword.isNotBlank()) {
+                                settings.addToBlocklist(newKeyword)
+                                blocklist = settings.getBlocklist().toList().sorted()
+                                newKeyword = ""
+                            }
+                        },
+                        modifier = Modifier.background(MossGreen.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Add", tint = GlowGreen)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Smart Suggestions
+                val suggestions = remember { com.xpenseatlas.logic.SmsScanner.getSmartBlockSuggestions(context) }
+                if (suggestions.isNotEmpty()) {
+                    Text(
+                        "SMART SUGGESTIONS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = MossGreen,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        suggestions.forEach { suggestion ->
+                            Surface(
+                                color = MossGreen.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.2f)),
+                                modifier = Modifier.clickable {
+                                    settings.addToBlocklist(suggestion)
+                                    blocklist = settings.getBlocklist().toList().sorted()
+                                }
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = GlowGreen, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(suggestion, color = GlowGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // List
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 200.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (blocklist.isEmpty()) {
+                        item {
+                            Text("No keywords blocked.", color = PixelGray, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
+                        }
+                    } else {
+                        items(blocklist) { keyword ->
+                            Surface(
+                                color = ForestBlack,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.1f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(keyword, color = PixelCream, fontSize = 13.sp)
+                                    Icon(
+                                        Icons.Default.Close, 
+                                        contentDescription = "Remove",
+                                        tint = PixelRed,
+                                        modifier = Modifier.size(16.dp).clickable {
+                                            settings.removeFromBlocklist(keyword)
+                                            blocklist = settings.getBlocklist().toList().sorted()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MossGreen),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("DONE", fontWeight = FontWeight.Bold, color = ForestBlack)
+                }
+            }
+        }
+    }
+}
+
+// ─── Sync Dialog ─────────────────────────────────────────────────────────────
+
+@Composable
+fun SyncDialog(
+    onDismiss: () -> Unit,
+    onSyncCurrentMonth: () -> Unit,
+    onSyncAllTime: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = ForestDark,
+            border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.3f))
+        ) {
+            Column(modifier = Modifier.padding(24.dp).fillMaxWidth()) {
+                Text(
+                    "SYNC TRANSACTIONS",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 14.sp,
+                    color = GlowGreen,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    "This will securely scan your SMS inbox for bank messages and merge them into your history. GPS locations of existing transactions will be preserved.",
+                    fontSize = 11.sp,
+                    color = PixelGray,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+                    lineHeight = 16.sp
+                )
+
+                Button(
+                    onClick = {
+                        onSyncCurrentMonth()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MossGreen),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("SYNC CURRENT MONTH", fontWeight = FontWeight.Bold, color = ForestBlack, fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        onSyncAllTime()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MossGreen),
+                    border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("SYNC ALL TIME (WIPE & REBUILD)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("CANCEL", color = PixelGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -294,10 +542,13 @@ fun DashboardScreen(
 @Composable
 fun TransactionDetailsDialog(
     item: TransactionWithMemory,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onBlockVendor: (String) -> Unit
 ) {
     val tx = item.transaction
     val dateFormat = SimpleDateFormat("EEEE, dd MMMM yyyy · hh:mm a", Locale.getDefault())
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -322,22 +573,70 @@ fun TransactionDetailsDialog(
                 DetailRow("Date", dateFormat.format(Date(tx.timestamp)))
                 
                 Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = MossGreen.copy(alpha = 0.1f))
+                HorizontalDivider(color = MossGreen.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text("GPS LOCATION", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MossGreen)
                 if (tx.latitude != null && tx.longitude != null) {
-                    Text(
-                        "${tx.latitude}, ${tx.longitude}",
-                        fontSize = 13.sp,
-                        color = PixelCream
-                    )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clickable {
+                                val uri = android.net.Uri.parse("geo:${tx.latitude},${tx.longitude}?q=${tx.latitude},${tx.longitude}(${android.net.Uri.encode(tx.vendor)})")
+                                val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                                mapIntent.setPackage("com.google.android.apps.maps")
+                                if (mapIntent.resolveActivity(context.packageManager) != null) {
+                                    context.startActivity(mapIntent)
+                                } else {
+                                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                                }
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        color = ForestBlack,
+                        border = BorderStroke(1.dp, MossGreen.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(MossGreen.copy(alpha = 0.1f), RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.LocationOn, contentDescription = "Map", tint = GlowGreen)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Map coordinates locked", color = PixelCream, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Tap to view in Google Maps", color = MossGreen, fontSize = 10.sp)
+                            }
+                        }
+                    }
                 } else {
-                    Text("No GPS data available.", fontSize = 13.sp, color = PixelGray)
+                    Text("No GPS data available.", fontSize = 13.sp, color = PixelGray, modifier = Modifier.padding(top = 4.dp))
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("RAW MESSAGE", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MossGreen)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("RAW MESSAGE", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MossGreen)
+                    IconButton(
+                        onClick = { 
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(tx.rawSms))
+                            android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = MossGreen, modifier = Modifier.size(16.dp))
+                    }
+                }
+                
                 Surface(
                     color = ForestBlack,
                     shape = RoundedCornerShape(8.dp),
@@ -353,13 +652,25 @@ fun TransactionDetailsDialog(
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MossGreen),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("CLOSE", fontWeight = FontWeight.Bold, color = ForestBlack)
+                
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { onBlockVendor(tx.vendor) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PixelRed),
+                        border = BorderStroke(1.dp, PixelRed.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("BLOCK", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MossGreen),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("CLOSE", fontWeight = FontWeight.Bold, color = ForestBlack, fontSize = 12.sp)
+                    }
                 }
             }
         }

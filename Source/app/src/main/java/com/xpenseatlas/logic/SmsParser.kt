@@ -12,7 +12,7 @@ data class ParsedTransaction(
 
 object SmsParser {
     // Matches currency followed by numbers: ₹500, Rs. 500, INR 500.00
-    private val AMOUNT_REGEX = Pattern.compile("(?i)(?:rs\\.?|inr|₹|\\$|£|€|aed)\\s*([\\d,]+\\.?\\d*)")
+    private val AMOUNT_REGEX = Pattern.compile("(?i)(rs\\.?|inr|₹|\\$|£|€|aed)\\s*([\\d,]+\\.?\\d*)")
     
     // Broad list of keywords for any transaction in Indian context
     private val DEBIT_KEYWORDS = listOf("debited", "spent", "paid", "sent", "payment", "withdrawn", "purchased", "txn", "trf", "vpa", "towards")
@@ -21,11 +21,12 @@ object SmsParser {
     // Hard-discard only absolute non-financial noise
     private val NOISE_KEYWORDS = listOf("otp", "pre-approved", "score", "insurance")
 
-    fun parse(sms: String): ParsedTransaction? {
+    fun parse(sms: String, customBlocklist: Set<String> = emptySet()): ParsedTransaction? {
         val cleanSms = sms.lowercase()
         
-        // 1. Hard-discard noise
+        // 1. Hard-discard noise and custom blocklist
         if (NOISE_KEYWORDS.any { cleanSms.contains(it) }) return null
+        if (customBlocklist.any { cleanSms.contains(it) }) return null
 
         // 2. Extract Amount
         val matcher = AMOUNT_REGEX.matcher(sms)
